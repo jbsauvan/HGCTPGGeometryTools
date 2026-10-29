@@ -56,20 +56,22 @@ def extract_layer(arrays, subdet, layer):
             layer_arrays[name] = array[(array.layer==layer) & ((array.subdet==subdets[name][1]) | (array.subdet==subdets[name][2])) & (array.zside==1)]
     return layer_arrays
 
-def group_by_module(array):
-    array_by_module = array[ak.argsort(array.modid)]
-    lengths = ak.run_lengths(array_by_module.modid)
-    array_by_module = ak.unflatten(
-        array_by_module, 
+def group_by(array, group):
+    array_by = array[ak.argsort(array[group])]
+    lengths = ak.run_lengths(array_by[group])
+    array_by = ak.unflatten(
+        array_by, 
         lengths
     )
-    return array_by_module
+    return array_by
 
-def to_parquet(arrays, cells_by_module, output_dir):
+
+def to_parquet(arrays, cells_by_module, cells_by_stc, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     for name, array in arrays.items():
         ak.to_parquet(array, f"{output_dir}/{name}.parquet")
     ak.to_parquet(cells_by_module, f"{output_dir}/cells_by_module.parquet")
+    ak.to_parquet(cells_by_stc, f"{output_dir}/cells_by_stc.parquet")
 
 
 
@@ -94,8 +96,8 @@ def cli(geometry_name,subdet):
                             }
                            )
     branches = {
-        'cells': ['id', 'modid', 'zside', 'subdet', 'layer', 'x', 'y', 'corners_x', 'corners_y', 'corners_z','errorbits'],
-        'triggercells': ['id', 'modid', 'zside', 'subdet', 'layer', 'x', 'y','errorbits'],
+        'cells': ['id', 'stcid', 'modid', 'zside', 'subdet', 'layer', 'x', 'y', 'corners_x', 'corners_y', 'corners_z','errorbits', 'tcid'],
+        'triggercells': ['id', 'modid', 'zside', 'subdet', 'layer', 'x', 'y','errorbits','cells'],
         'modules': ['id', 'cells', 'triggercells', 'zside', 'subdet', 'layer', 'errorbits', 'disconnected']
     }
     arrays = to_awkward(trees, branches)
@@ -106,6 +108,7 @@ def cli(geometry_name,subdet):
     with click.progressbar(layers) as bar:
         for layer in bar:
             layer_arrays = extract_layer(arrays, subdet=subdet, layer=layer)
-            cells_by_module = group_by_module(layer_arrays['cells'])
-            to_parquet(layer_arrays, cells_by_module, f'resources/{geometry_name}/{subdet}_layer{layer}/')
+            cells_by_module = group_by(layer_arrays['cells'], group='modid')
+            cells_by_stc = group_by(layer_arrays['cells'], group='stcid')
+            to_parquet(layer_arrays, cells_by_module, cells_by_stc, f'resources/{geometry_name}/{subdet}_layer{layer}/')
 

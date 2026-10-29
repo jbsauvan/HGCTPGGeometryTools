@@ -10,7 +10,7 @@ from shapely.geometry import Polygon, MultiPolygon
 import shapely
 
 def polygon_from_cell(cell):
-    nb_corners = len(cell.corners_x/2)
+    nb_corners = len(cell.corners_x)/2
     corners = [(x,y) for x,y in zip(cell.corners_x[:nb_corners], cell.corners_y[0:nb_corners])]
     return Polygon(corners)
 
@@ -28,12 +28,10 @@ def union_polygons(polygons, use_buffer=False):
     if use_buffer:
         for i,polygon in enumerate(polygons):
             polygons[i] = polygon.buffer(-margin)
+        union_geom = union_geom.buffer(-margin)
     # If the union is a single polygon
     if isinstance(union_geom, Polygon):
-        if use_buffer:
-            return Polygon(union_geom.buffer(-margin).exterior)
-        else:
-            return Polygon(union_geom.exterior)
+        return Polygon(union_geom.exterior)
     # If the union is a MultiPolygon, take the outer hull
     elif isinstance(union_geom, MultiPolygon):
         return union_geom.convex_hull
@@ -59,9 +57,22 @@ def module_shapes_and_errors(cells_by_module, array_modules):
         modules[modid] = {'type': 'ceh' if subdet==10 else 'cee', 'disconnected':disconnected,'shape':mod_poly, 'errors':errorbits, 'cellerrors':cell_errors}
     return modules
 
+
+def stc_shapes(cells_by_stc):
+    stcs = {}
+    for stc in cells_by_stc:
+        stcid = stc[0].stcid
+        subdet = stc[0].subdet
+        polygons = []
+        for cell in stc:
+            polygons.append(polygon_from_cell(cell))
+        stc_poly = union_polygons(polygons)
+        stcs[stcid] = {'type': 'ceh' if subdet==10 else 'cee', 'shape':stc_poly}
+    return stcs
+
 def from_parquet(input_directory):
     arrays = {}
-    objects = ['cells', 'triggercells', 'modules', 'cells_by_module']
+    objects = ['cells', 'triggercells', 'modules', 'cells_by_module', 'cells_by_stc']
     for subdet in ['cee','ceh']:
         arrays[subdet] = {}
         if subdet=='cee': maxlayer=26
@@ -73,7 +84,7 @@ def from_parquet(input_directory):
                 arrays[subdet][layer][obj] = ak.from_parquet(f"{input_directory}/{subdet}_layer{layer}/{obj}.parquet")
     return arrays
 
-def to_json(modules, output_file):
+def modules_to_json(modules, output_file):
     modules_list = []
     for modid,module in modules.items():
         geojson_dict = json.loads(shapely.to_geojson(module['shape']))
@@ -81,8 +92,17 @@ def to_json(modules, output_file):
     modules_json = json.dumps(modules_list)
     with open(output_file, 'w') as f:
         f.write(modules_json)
+
+def stcs_to_json(stcs, output_file):
+    stcs_list = []
+    for stcid,stc in stcs.items():
+        geojson_dict = json.loads(shapely.to_geojson(stc['shape']))
+        stcs_list.append({'stcid':int(stcid), 'shape':geojson_dict})
+    stcs_json = json.dumps(stcs_list)
+    with open(output_file, 'w') as f:
+        f.write(stcs_json)
         
-def from_json(input_directory):
+def modules_from_json(input_directory):
     modules = {}
     for subdet in ['cee','ceh']:
         modules[subdet] = {}
@@ -90,11 +110,23 @@ def from_json(input_directory):
         elif subdet=='ceh': maxlayer=21
         layers = range(1,maxlayer+1)
         for layer in layers:
-            with open(f'{input_directory}/{subdet}_layer{layer}.json', 'r') as f:
+            with open(f'{input_directory}/module/{subdet}_layer{layer}.json', 'r') as f:
                 modules[subdet][layer] = json.load(f)
                 for module in modules[subdet][layer]:
                     module['shape'] = shapely.from_geojson(json.dumps(module['shape']))
     return modules
+
+def stcs_from_json(input_directory):
+    stcs = {}
+    maxlayer=21
+    layers = range(1,maxlayer+1)
+    for layer in layers:
+        with open(f'{input_directory}/stc/ceh_layer{layer}.json', 'r') as f:
+            stcs[layer] = json.load(f)
+            for stc in stcs[layer]:
+                stc['shape'] = shapely.from_geojson(json.dumps(stc['shape']))
+    return stcs
+
 
 
 @click.command()
@@ -103,18 +135,32 @@ def from_json(input_directory):
               required=True,
               help='Trigger geometry name (name of the geometry ROOT file without the .root extension)'
               )
-def cli(geometry_name):
+@click.option('--object',
+              'object_type',
+              required=True,
+              type=click.Choice(['module', 'stc']),
+              help='Type of geometry object to build. Choice among (module, stc)'
+              )
+def cli(geometry_name, object_type):
     click.echo('> Reading geometry Parquet files')
     arrays = from_parquet(f'resources/{geometry_name}')
     os.makedirs(f'resources/{geometry_name}/geojson', exist_ok=True)
-    for subdet in ['cee', 'ceh']:
+    subdets = {'module': ['cee', 'ceh'], 'stc':['ceh']}
+    for subdet in subdets[object_type]:
         if subdet=='cee': maxlayer=26
         elif subdet=='ceh': maxlayer=21
         layers = range(1,maxlayer+1)
-        click.echo(f'> Building {subdet} Shapely polygons')
+        click.echo(f'> Building {subdet} {object_type} polygons')
         with click.progressbar(layers) as bar:
             for layer in bar:
-                modules = module_shapes_and_errors(arrays[subdet][layer]['cells_by_module'], arrays[subdet][layer]['modules'])
-                to_json(modules, f'resources/{geometry_name}/geojson/{subdet}_layer{layer}.json')
+                match object_type:
+                    case 'module':
+                        objects = module_shapes_and_errors(arrays[subdet][layer]['cells_by_module'], arrays[subdet][layer]['modules'])
+                        modules_to_json(objects, f'resources/{geometry_name}/geojson/{object_type}/{subdet}_layer{layer}.json')
+                    case 'stc':
+                        objects = stc_shapes(arrays[subdet][layer]['cells_by_stc'])
+                        stcs_to_json(objects, f'resources/{geometry_name}/geojson/{object_type}/{subdet}_layer{layer}.json')
+                    case _:
+                        raise KeyError(f'No geometry implemented for object {object_type}')
 
 

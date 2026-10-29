@@ -25,20 +25,28 @@ rule extract_geometry_ceh:
   shell:
     f"extract-geometry --geometry {config['geometry']} --subdet ceh"
 
-rule create_geojson:
+rule create_module_geojson:
   input:
     expand(f"resources/{config['geometry']}/cee_layer{{layer}}/{{object}}.parquet", layer=LAYERS_CEE, object=OBJECTS),
     expand(f"resources/{config['geometry']}/ceh_layer{{layer}}/{{object}}.parquet", layer=LAYERS_CEH, object=OBJECTS)
   output:
-    expand(f"resources/{config['geometry']}/geojson/cee_layer{{layer}}.json", layer=LAYERS_CEE),
-    expand(f"resources/{config['geometry']}/geojson/ceh_layer{{layer}}.json", layer=LAYERS_CEH)
+    expand(f"resources/{config['geometry']}/geojson/module/cee_layer{{layer}}.json", layer=LAYERS_CEE),
+    expand(f"resources/{config['geometry']}/geojson/module/ceh_layer{{layer}}.json", layer=LAYERS_CEH)
   shell:
-    f"create-geojson --geometry {config['geometry']}"
+    f"create-geojson --geometry {config['geometry']} --object module"
+
+rule create_stc_geojson:
+  input:
+    expand(f"resources/{config['geometry']}/ceh_layer{{layer}}/{{object}}.parquet", layer=LAYERS_CEH, object=OBJECTS)
+  output:
+    expand(f"resources/{config['geometry']}/geojson/stc/ceh_layer{{layer}}.json", layer=LAYERS_CEH)
+  shell:
+    f"create-geojson --geometry {config['geometry']} --object stc"
 
 rule plot:
   input:
-    expand(f"resources/{config['geometry']}/geojson/cee_layer{{layer}}.json", layer=LAYERS_CEE),
-    expand(f"resources/{config['geometry']}/geojson/ceh_layer{{layer}}.json", layer=LAYERS_CEH),
+    expand(f"resources/{config['geometry']}/geojson/module/cee_layer{{layer}}.json", layer=LAYERS_CEE),
+    expand(f"resources/{config['geometry']}/geojson/module/ceh_layer{{layer}}.json", layer=LAYERS_CEH),
     expand(f"resources/{config['geometry']}/cee_layer{{layer}}/{{object}}.parquet", layer=LAYERS_CEE, object=OBJECTS),
     expand(f"resources/{config['geometry']}/ceh_layer{{layer}}/{{object}}.parquet", layer=LAYERS_CEH, object=OBJECTS),
 
