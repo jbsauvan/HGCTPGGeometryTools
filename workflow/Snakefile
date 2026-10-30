@@ -37,6 +37,7 @@ rule create_module_geojson:
 
 rule create_stc_geojson:
   input:
+    expand(f"resources/{config['geometry']}/cee_layer{{layer}}/{{object}}.parquet", layer=LAYERS_CEE, object=OBJECTS),
     expand(f"resources/{config['geometry']}/ceh_layer{{layer}}/{{object}}.parquet", layer=LAYERS_CEH, object=OBJECTS)
   output:
     expand(f"resources/{config['geometry']}/geojson/stc/ceh_layer{{layer}}.json", layer=LAYERS_CEH)
